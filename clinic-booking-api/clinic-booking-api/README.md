@@ -13,8 +13,7 @@ Built for Task 1 of the Koya Cohort 4 assessment.
 | `app.js` | The whole API. Every endpoint, with comments explaining each step. |
 | `schema.sql` | Creates the database tables. Run once. |
 | `public/index.html` | The web page patients use. |
-| `api/index.js` + `vercel.json` | Two tiny files that tell Vercel how to run `app.js`. |
-| `server.js` | Runs the app on your own computer. |
+| `server.js` | Runs the app on your own computer. (Vercel finds and runs `app.js` by itself.) |
 | `seed.js` | Loads sample slots so the page has something to show. |
 | `test.js` | 80 automatic checks covering all five levels. |
 | `.env.example` | Template for your secrets (API key, database address). |
@@ -62,7 +61,8 @@ Every request needs the header `X-API-Key: <your key>`. Every error looks like `
 1. **Neon:** create a project (region: AWS US East, N. Virginia), open the SQL Editor, paste `schema.sql`, Run.
    Copy the **pooled** connection string.
 2. **GitHub:** put this folder in a public repository.
-3. **Vercel:** Add New > Project > import the repository. Before deploying, add two Environment Variables:
+3. **Vercel:** Add New > Project > import the repository. Set Root Directory to the folder containing `app.js`.
+   Vercel detects the Express app automatically, so no `vercel.json` is needed. Before deploying, add two Environment Variables:
    `API_KEY` (a long random string you choose) and `DATABASE_URL` (the Neon string). Deploy.
 4. **Check it:** `node test.js https://YOUR-APP.vercel.app YOUR_API_KEY` (this wipes bookings).
 5. **Sample data for the page:** `node seed.js https://YOUR-APP.vercel.app YOUR_API_KEY`
