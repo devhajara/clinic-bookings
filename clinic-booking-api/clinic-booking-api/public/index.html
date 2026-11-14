@@ -28,10 +28,20 @@
     button:disabled { opacity:.5; cursor:not-allowed; }
     button.plain { background:#fff; color:var(--brand); }
     button.danger { background:#fff; color:var(--bad); border-color:var(--bad); padding:6px 12px; }
+    .views { position:sticky; top:0; z-index:5; background:#fff; border-bottom:1px solid var(--line);
+             display:flex; justify-content:center; gap:8px; padding:10px 20px; }
+    .view { background:#fff; color:var(--brand); border-color:var(--line); border-radius:99px; padding:8px 20px; }
+    .view:hover { background:var(--ok-bg); }
+    .view.on { background:var(--brand); color:#fff; border-color:var(--brand); }
     .slots { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
     .slot { text-align:left; background:#fff; color:var(--ink); border:1px solid var(--line); padding:10px 12px; }
     .slot:hover:not(:disabled) { border-color:var(--brand); background:var(--ok-bg); }
     .slot.picked { border-color:var(--brand); background:var(--ok-bg); box-shadow:0 0 0 2px var(--brand) inset; }
+    .days { display:flex; gap:8px; overflow-x:auto; padding:4px 2px 12px; margin-top:12px; }
+    .day { flex:0 0 auto; background:#fff; color:var(--ink); border:1px solid var(--line); padding:8px 14px; text-align:center; }
+    .day:hover { background:var(--ok-bg); border-color:var(--brand); }
+    .day.on { background:var(--brand); color:#fff; border-color:var(--brand); }
+    .day small { display:block; font-weight:400; opacity:.8; }
     .slot small { display:block; color:var(--muted); font-weight:400; }
     .msg { padding:12px 14px; border-radius:8px; margin-top:14px; }
     .msg.error { background:var(--bad-bg); color:var(--bad); }
@@ -54,7 +64,14 @@
     <p>Pick a free time, enter your details, and you're booked.</p>
   </header>
 
+  <!-- Always-visible switch between the two things a patient can do. -->
+  <nav class="views">
+    <button id="tab-book" class="view on" data-view="book">Book an appointment</button>
+    <button id="tab-mine" class="view" data-view="mine">My bookings</button>
+  </nav>
+
   <main>
+   <div id="view-book">
     <!-- 1. AVAILABLE SLOTS -->
     <section class="card">
       <div class="row">
@@ -87,8 +104,10 @@
       <div id="confirm"></div>
     </section>
 
-    <!-- MY BOOKINGS -->
-    <section class="card">
+   </div>
+
+    <!-- MY BOOKINGS (its own view, opened from the switch at the top) -->
+    <section class="card" id="view-mine" hidden>
       <h2>My bookings</h2>
       <form id="mine-form" class="row">
         <div>
@@ -112,6 +131,7 @@
     const $ = (id) => document.getElementById(id); // shortcut to grab an element
 
     let allSlots = [];       // the latest list of slots from the API
+    let pickedDay = null;    // the day whose times are on show
     let pickedSlot = null;   // the slot the patient clicked
     let pendingKey = null;   // Idempotency-Key for the booking being sent
     let mineEmail = "";      // email used in "My bookings"
@@ -139,6 +159,20 @@
     const day = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
     const time = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
+    // ───────────── Switching views ─────────────
+    // The page has two views: "book" and "mine". Only one shows at a time,
+    // and the switch at the top is always on screen.
+    function showView(name) {
+      $("view-book").hidden = name !== "book";
+      $("view-mine").hidden = name !== "mine";
+      $("tab-book").classList.toggle("on", name === "book");
+      $("tab-mine").classList.toggle("on", name === "mine");
+      window.scrollTo({ top: 0 });
+    }
+    document.querySelector(".views").addEventListener("click", (event) => {
+      if (event.target.dataset.view) showView(event.target.dataset.view);
+    });
+
     // ───────────── 1. Slots ─────────────
     async function loadSlots() {
       const result = await api("GET", "/slots");
@@ -157,6 +191,9 @@
       drawSlots();
     }
 
+    // Short label for a day button, e.g. "Mon 16 Nov".
+    const shortDay = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+
     function drawSlots() {
       const provider = $("provider").value;
       const shown = allSlots.filter((s) => !provider || s.provider === provider);
@@ -164,31 +201,57 @@
         $("slots").innerHTML = `<p class="muted">No appointment times have been published yet.</p>`;
         return;
       }
-      // Group the slots under a heading for each day.
+      // Group the slots by day. Only ONE day is shown at a time, so the page
+      // stays short however many days of slots exist.
       const byDay = {};
       for (const slot of shown) (byDay[day(slot.start)] ||= []).push(slot);
+      const dayNames = Object.keys(byDay);
+      const isOpen = (slot) => slot.available && new Date(slot.start) > new Date();
 
-      let html = "";
-      for (const [dayName, slots] of Object.entries(byDay)) {
-        html += `<h3>${safe(dayName)}</h3><div class="slots">`;
-        for (const slot of slots) {
-          const past = new Date(slot.start) <= new Date();
-          const state = past ? "Past" : slot.available ? "Available" : "Booked";
-          const picked = pickedSlot && pickedSlot.id === slot.id ? "picked" : "";
-          html += `<button class="slot ${picked}" data-id="${safe(slot.id)}" ${past || !slot.available ? "disabled" : ""}>
-                     ${safe(time(slot.start))} – ${safe(time(slot.end))}
-                     <small>${safe(slot.provider)} · ${state}</small>
-                   </button>`;
-        }
-        html += `</div>`;
+      // Keep the chosen day if it still exists; otherwise pick the first day
+      // that still has a free slot.
+      if (!dayNames.includes(pickedDay)) {
+        pickedDay = dayNames.find((d) => byDay[d].some(isOpen)) || dayNames[0];
       }
+
+      // A row of day buttons that scrolls sideways.
+      let html = `<div class="days">`;
+      for (const dayName of dayNames) {
+        const free = byDay[dayName].filter(isOpen).length;
+        html += `<button class="day ${dayName === pickedDay ? "on" : ""}" data-day="${safe(dayName)}">
+                   ${safe(shortDay(byDay[dayName][0].start))}
+                   <small>${free ? free + " free" : "Full"}</small>
+                 </button>`;
+      }
+      html += `</div><h3>${safe(pickedDay)}</h3><div class="slots">`;
+
+      for (const slot of byDay[pickedDay]) {
+        const past = new Date(slot.start) <= new Date();
+        const state = past ? "Past" : slot.available ? "Available" : "Booked";
+        const picked = pickedSlot && pickedSlot.id === slot.id ? "picked" : "";
+        html += `<button class="slot ${picked}" data-id="${safe(slot.id)}" ${past || !slot.available ? "disabled" : ""}>
+                   ${safe(time(slot.start))} – ${safe(time(slot.end))}
+                   <small>${safe(slot.provider)} · ${state}</small>
+                 </button>`;
+      }
+      html += `</div>`;
+
+      // Redrawing would reset the sideways scroll, so remember and restore it.
+      const strip = $("slots").querySelector(".days");
+      const scrolled = strip ? strip.scrollLeft : null;
       $("slots").innerHTML = html;
+      const newStrip = $("slots").querySelector(".days");
+      if (scrolled !== null) newStrip.scrollLeft = scrolled;
+      else newStrip.querySelector(".on").scrollIntoView({ block: "nearest", inline: "center" });
     }
 
     $("provider").addEventListener("change", drawSlots);
 
     // Clicking a slot opens the booking form for it.
     $("slots").addEventListener("click", (event) => {
+      // Clicking a day button switches which day's times are shown.
+      const dayButton = event.target.closest(".day");
+      if (dayButton) { pickedDay = dayButton.dataset.day; drawSlots(); return; }
       const button = event.target.closest(".slot");
       if (!button || button.disabled) return;
       pickedSlot = allSlots.find((s) => s.id === button.dataset.id);
@@ -253,10 +316,20 @@
             <dt>With</dt><dd>${safe(slot ? slot.provider : "")}</dd>
             <dt>Status</dt><dd>${safe(booking.status)}</dd>
           </dl>
+          <p><button class="plain" id="see-mine" data-email="${safe(booking.email)}">See all my bookings</button></p>
         </div>`;
       $("confirm-card").hidden = false;
       $("confirm-card").scrollIntoView({ behavior: "smooth" });
     }
+
+    // The button inside the confirmation: jump to "My bookings" with the
+    // email already filled in and the list loaded.
+    $("confirm").addEventListener("click", (event) => {
+      if (event.target.id !== "see-mine") return;
+      $("mine-email").value = event.target.dataset.email;
+      showView("mine");
+      $("mine-form").requestSubmit();
+    });
 
     // ───────────── My bookings (list, page through, cancel) ─────────────
     $("mine-form").addEventListener("submit", (event) => {
