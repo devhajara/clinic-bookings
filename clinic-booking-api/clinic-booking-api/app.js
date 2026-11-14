@@ -17,8 +17,8 @@ const path = require("path"); //       path: built into Node, builds folder path
 
 // Secrets are NOT written in the code. They come from "environment
 // variables": settings stored on the computer/host running the app.
-const API_KEY = process.env.API_KEY; //           the password for our API
-const DATABASE_URL = process.env.DATABASE_URL; // the address of our database
+const API_KEY = (process.env.API_KEY || "").trim(); //           the password for our API
+const DATABASE_URL = (process.env.DATABASE_URL || "").trim(); // the address of our database
 
 // A "pool" is a small set of open connections to the database that
 // requests borrow and hand back, like tills at a bank.
