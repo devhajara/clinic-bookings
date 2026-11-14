@@ -1,5 +1,4 @@
 // app.js
-// The whole API lives in this file. Read it top to bottom:
 //   1. Setup            - load tools, connect to the database
 //   2. Helpers          - small reusable functions
 //   3. Open routes      - the web page and its config (no key needed)
@@ -9,25 +8,18 @@
 
 // ───────────────────────────── 1. SETUP ─────────────────────────────
 
-// "require" loads code other people wrote so we don't have to.
 const express = require("express"); // express: listens for web requests
 const { Pool } = require("pg"); //     pg: talks to a Postgres database
 const crypto = require("crypto"); //   crypto: built into Node, makes ids and hashes
 const path = require("path"); //       path: built into Node, builds folder paths
 
-// Secrets are NOT written in the code. They come from "environment
-// variables": settings stored on the computer/host running the app.
 const API_KEY = (process.env.API_KEY || "").trim(); //           the password for our API
 const DATABASE_URL = (process.env.DATABASE_URL || "").trim(); // the address of our database
 
-// A "pool" is a small set of open connections to the database that
-// requests borrow and hand back, like tills at a bank.
 const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
 
 const app = express();
 
-// Let other websites' pages call this API too (CORS). Our own page is on
-// the same address so it doesn't need this, but a browser-based checker might.
 app.use((req, res, next) => {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Idempotency-Key");
@@ -47,7 +39,6 @@ function sendError(res, status, message) {
   return res.status(status).json({ error: message });
 }
 
-// Is this a real piece of text with something in it (not just spaces)?
 function isFilledText(value) {
   return typeof value === "string" && value.trim() !== "";
 }
@@ -88,20 +79,13 @@ async function inTransaction(work) {
 
 // ─────────────────────────── 3. OPEN ROUTES ─────────────────────────
 
-// Serve the web page (public/index.html) at the home address.
-// (On Vercel the public folder is served automatically; this line makes
-// it work the same way on your own computer.)
 app.use(express.static(path.join(__dirname, "public")));
 
-// The web page needs the API key to call the API. Instead of typing the key
-// into the page's code (which would put it on GitHub), the page loads this
-// tiny script, which hands it the key from the environment variable.
 app.get("/config.js", (req, res) => {
   res.type("application/javascript");
   res.send(`window.API_KEY = ${JSON.stringify(API_KEY || "")};`);
 });
 
-// Browsers always ask for a tab icon. We have none; say so quietly.
 app.get("/favicon.ico", (req, res) => res.sendStatus(204));
 
 // ───────────────────── 4. LEVEL 2: THE KEY CHECK ────────────────────
@@ -191,19 +175,10 @@ app.get("/slots", async (req, res) => {
   });
 });
 
-// POST /bookings (levels 1 to 5)
-// The heart of the project. The steps happen in this order:
-//   a. LEVEL 4  have we already answered this Idempotency-Key? repeat the answer
-//   b. LEVEL 5  has this email tried too many times this minute? 429
-//   c. LEVEL 2  are the details valid? does the slot exist and is it in the future?
-//   d. LEVEL 3  try to save. The database rejects it if the slot is taken: 409
-//   e. LEVEL 4  remember the answer for this Idempotency-Key
 app.post("/bookings", async (req, res) => {
   const body = req.body && typeof req.body === "object" ? req.body : {};
   const idempotencyKey = req.get("Idempotency-Key") || null;
 
-  // A "hash" is a fingerprint of the request details. Same details give the
-  // same fingerprint, so we can tell if a retry really is the same request.
   const bodyHash = crypto
     .createHash("sha256")
     .update(JSON.stringify([body.slot_id, body.name, body.email]))
@@ -292,11 +267,7 @@ app.post("/bookings", async (req, res) => {
     if (slot.rows[0].started) return finish(400, { error: "slot has already started" });
 
     // ── d. LEVEL 3: save the booking ──
-    // We do NOT check "is it free?" first and then save. Two requests could
-    // both see "free" and both save. Instead we just try to save, and the
-    // unique rule in schema.sql lets exactly one through.
-    // "ON CONFLICT ... DO NOTHING" means: if the rule blocks us, save nothing
-    // and return zero rows, instead of crashing.
+    
     const inserted = await db.query(
       `INSERT INTO bookings (id, slot_id, name, email, status)
        VALUES ($1, $2, $3, $4, 'confirmed')
